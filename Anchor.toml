@@ -1,0 +1,4 @@
+[programs.devnet]
+game_assets = "GameAssEt11111111111111111111111111111111111"
+
+[workspace]
