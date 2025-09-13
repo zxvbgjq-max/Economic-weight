@@ -1,0 +1,210 @@
+use anchor_lang::prelude::*;
+use anchor_spl::token::{self, Token, Mint, TokenAccount, MintTo};
+use mpl_token_metadata::instruction as mpl_instruction;
+use solana_program::program::invoke;
+
+declare_id!("GameAssEt11111111111111111111111111111111111");
+
+#[program]
+pub mod game_assets {
+    use super::*;
+
+    // -------- Игровая валюта (SPL fungible) --------
+    pub fn initialize_currency(
+        ctx: Context<InitializeCurrency>,
+        decimals: u8,
+        supply: u64,
+    ) -> Result<()> {
+        let asset = &mut ctx.accounts.asset;
+        asset.kind = AssetKind::Currency;
+        asset.owner = ctx.accounts.authority.key();
+        asset.mint = ctx.accounts.mint.key();
+
+        // Mint initial supply
+        let cpi_accounts = MintTo {
+            mint: ctx.accounts.mint.to_account_info(),
+            to: ctx.accounts.treasury_ata.to_account_info(),
+            authority: ctx.accounts.mint_authority.to_account_info(),
+        };
+        let cpi_ctx = CpiContext::new(ctx.accounts.token_program.to_account_info(), cpi_accounts);
+        token::mint_to(cpi_ctx, supply)?;
+        Ok(())
+    }
+
+    // -------- NFT предмет --------
+    pub fn mint_nft_item(ctx: Context<MintNft>, name: String, uri: String) -> Result<()> {
+        let asset = &mut ctx.accounts.asset;
+        asset.kind = AssetKind::Item;
+        asset.owner = ctx.accounts.authority.key();
+        asset.mint = ctx.accounts.mint.key();
+
+        // Вызов Metaplex Token Metadata CPI
+        let ix = mpl_instruction::create_metadata_accounts_v3(
+            ctx.accounts.metadata_program.key(),
+            ctx.accounts.metadata.key(),
+            ctx.accounts.mint.key(),
+            ctx.accounts.mint_authority.key(),
+            ctx.accounts.authority.key(),
+            ctx.accounts.authority.key(),
+            name,
+            "GAME".to_string(),
+            uri,
+            None,
+            1,
+            true,
+            false,
+            None,
+            None,
+            None,
+        );
+        invoke(
+            &ix,
+            &[
+                ctx.accounts.metadata_program.to_account_info(),
+                ctx.accounts.metadata.to_account_info(),
+                ctx.accounts.mint.to_account_info(),
+                ctx.accounts.mint_authority.to_account_info(),
+                ctx.accounts.authority.to_account_info(),
+                ctx.accounts.system_program.to_account_info(),
+                ctx.accounts.rent.to_account_info(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    // -------- NFT земля (виртуальная недвижимость) --------
+    pub fn mint_virtual_land(
+        ctx: Context<MintNft>,
+        world_id: String,
+        coords: String,
+        uri: String,
+    ) -> Result<()> {
+        let name = format!("Land {} @ {}", world_id, coords);
+        let ix = mpl_instruction::create_metadata_accounts_v3(
+            ctx.accounts.metadata_program.key(),
+            ctx.accounts.metadata.key(),
+            ctx.accounts.mint.key(),
+            ctx.accounts.mint_authority.key(),
+            ctx.accounts.authority.key(),
+            ctx.accounts.authority.key(),
+            name,
+            "LAND".to_string(),
+            uri,
+            None,
+            1,
+            true,
+            false,
+            None,
+            None,
+            None,
+        );
+        invoke(
+            &ix,
+            &[
+                ctx.accounts.metadata_program.to_account_info(),
+                ctx.accounts.metadata.to_account_info(),
+                ctx.accounts.mint.to_account_info(),
+                ctx.accounts.mint_authority.to_account_info(),
+                ctx.accounts.authority.to_account_info(),
+                ctx.accounts.system_program.to_account_info(),
+                ctx.accounts.rent.to_account_info(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    // -------- NFT Achievement (невзаимозаменяемый токен с soulbound-логикой) --------
+    pub fn mint_achievement(ctx: Context<MintNft>, title: String, uri: String) -> Result<()> {
+        let ix = mpl_instruction::create_metadata_accounts_v3(
+            ctx.accounts.metadata_program.key(),
+            ctx.accounts.metadata.key(),
+            ctx.accounts.mint.key(),
+            ctx.accounts.mint_authority.key(),
+            ctx.accounts.authority.key(),
+            ctx.accounts.authority.key(),
+            title,
+            "ACHV".to_string(),
+            uri,
+            None,
+            1,
+            true,
+            true, // mark as non-transferable (soulbound flag)
+            None,
+            None,
+            None,
+        );
+        invoke(
+            &ix,
+            &[
+                ctx.accounts.metadata_program.to_account_info(),
+                ctx.accounts.metadata.to_account_info(),
+                ctx.accounts.mint.to_account_info(),
+                ctx.accounts.mint_authority.to_account_info(),
+                ctx.accounts.authority.to_account_info(),
+                ctx.accounts.system_program.to_account_info(),
+                ctx.accounts.rent.to_account_info(),
+            ],
+        )?;
+        Ok(())
+    }
+}
+
+// -------- Contexts --------
+#[derive(Accounts)]
+pub struct InitializeCurrency<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    #[account(
+        init,
+        payer = authority,
+        space = 8 + Asset::LEN,
+        seeds = [b"asset", mint.key().as_ref()],
+        bump
+    )]
+    pub asset: Account<'info, Asset>,
+
+    #[account(mut)]
+    pub mint: Account<'info, Mint>,
+    pub mint_authority: Signer<'info>,
+    #[account(mut)]
+    pub treasury_ata: Account<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct MintNft<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(mut)]
+    pub mint: Account<'info, Mint>,
+    pub mint_authority: Signer<'info>,
+    #[account(mut)]
+    pub metadata: UncheckedAccount<'info>,
+    pub metadata_program: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
+    #[account(init, payer = authority, space = 8 + Asset::LEN, seeds = [b"asset", mint.key().as_ref()], bump)]
+    pub asset: Account<'info, Asset>,
+}
+
+// -------- PDA Models --------
+#[account]
+pub struct Asset {
+    pub kind: AssetKind,
+    pub owner: Pubkey,
+    pub mint: Pubkey,
+}
+impl Asset {
+    pub const LEN: usize = 1 + 32 + 32 + 8;
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq)]
+pub enum AssetKind {
+    Currency,
+    Item,
+    Land,
+    Achievement,
+}
